@@ -9,34 +9,46 @@ Sistema de visión por computadora para detectar y rastrear partículas de micro
 
 ## Instalación
 
-### Con UV (recomendado)
+### En Raspberry Pi con Thonny (recomendado)
+
+Abre una terminal en la Pi e instala las dependencias:
+
+```bash
+pip install numpy opencv-python
+```
+
+Luego abre `main.py` en Thonny y presiona **Run (F5)**.
+
+> Alternativa desde Thonny: Herramientas → Gestionar paquetes → busca e instala `numpy` y `opencv-python`.
+
+### Con UV (PC/desarrollo)
 
 ```bash
 uv sync
 ```
 
-### Con pip
+### Con pip (PC)
 
 ```bash
-pip install "numpy>=2.4.4" "opencv-python>=4.13.0.92"
+pip install -r requirements.txt
 ```
 
 ## Uso
 
-1. Coloca el archivo de video en la raíz del proyecto.
+1. Coloca el archivo de video en la misma carpeta que `main.py`.
 2. Edita las constantes al inicio de `main.py` según tu video:
 
 ```python
-VIDEO_PATH = "tu_video.mp4"   # Ruta al video
-START_SEC  = 30               # Segundo de inicio del análisis
-STOP_SEC   = 60               # Segundo de fin del análisis
-CSV_PATH   = "resultados.csv" # Archivo de salida
+VIDEO_PATH = os.path.join(_DIR, "tu_video.mp4")  # nombre del archivo de video
+START_SEC  = 30                                   # segundo de inicio del análisis
+STOP_SEC   = 60                                   # segundo de fin del análisis
 ```
 
 3. Ejecuta el script principal:
 
 ```bash
 python main.py
+# o desde Thonny: presiona F5
 ```
 
 Durante la ejecución se abrirán tres ventanas de OpenCV:
