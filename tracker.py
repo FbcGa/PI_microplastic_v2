@@ -1,6 +1,8 @@
 import math
 from collections import OrderedDict, deque
 
+from detector import Detection
+
 MAX_DISTANCE_MIN = 350   # radio mínimo de búsqueda para tracks sin velocidad histórica
 VELOCITY_MARGIN = 4.0    # multiplicador sobre la última velocidad observada
 MAX_DISAPPEARED = 60     # frames sin detección antes de eliminar un track
@@ -11,10 +13,10 @@ TRAIL_LEN = 20           # cantidad de posiciones anteriores que se guardan por 
 class CentroidTracker:
     def __init__(self):
         self.next_id = 0
-        self.objects: OrderedDict[int, tuple] = OrderedDict()   # id → centroid
+        self.objects: OrderedDict[int, tuple] = OrderedDict()
         self.disappeared: dict[int, int] = {}
-        self.trails: dict[int, deque] = {}                      # id → últimas N posiciones
-        self.velocities: dict[int, float] = {}                  # id → px movidos último frame
+        self.trails: dict[int, deque] = {}
+        self.velocities: dict[int, float] = {}
         self.total_count = 0
 
     def _register(self, centroid: tuple) -> None:
@@ -54,7 +56,7 @@ class CentroidTracker:
             obj_id = obj_ids[row]
             max_d = max(MAX_DISTANCE_MIN, self.velocities[obj_id] * VELOCITY_MARGIN)
             if dist_val > max_d:
-                continue  # no break — el umbral es por track, no global
+                continue
             self.objects[obj_id] = centroids[col]
             self.trails[obj_id].append(centroids[col])
             self.velocities[obj_id] = dist_val
@@ -66,8 +68,8 @@ class CentroidTracker:
     def active_objects(self) -> dict[int, tuple]:
         return {oid: c for oid, c in self.objects.items() if self.disappeared[oid] == 0}
 
-    def update(self, detections: list[dict]) -> dict[int, tuple]:
-        centroids = [d["centroid"] for d in detections]
+    def update(self, detections: list[Detection]) -> dict[int, tuple]:
+        centroids = [d.centroid for d in detections]
 
         if not centroids:
             self._age_all()
