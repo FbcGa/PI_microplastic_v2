@@ -85,7 +85,7 @@ def main():
             frame = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_I420)
 
             detections = detect_particles(frame)
-            area_map   = {d["centroid"]: d["area"] for d in detections}
+            area_map   = {d.centroid: d.area for d in detections}
 
             tracker.update(detections)
             active = tracker.active_objects()
