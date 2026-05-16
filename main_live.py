@@ -3,52 +3,27 @@ import math
 import os
 import subprocess
 import time
+
 import cv2
 import numpy as np
+
 from detector import detect_particles
 from tracker import CentroidTracker
+from arduino import ArduinoController
+from overlay import draw_overlay, draw_trails
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
 
 CAMERA_WIDTH  = 1280
 CAMERA_HEIGHT = 720
 CAMERA_FPS    = 30
-AWB_GAINS     = "3.0,1.8"   # ganancias AWB para la iluminación del experimento
-DISPLAY_SCALE = 0.5          # escala de visualización (0.5 = mitad del tamaño original)
-CSV_PATH = os.path.join(_DIR, "resultados.csv")
-
-CSV_COLUMNS = ["frame", "tiempo_seg", "id", "cx", "cy", "velocidad_px_frame", "area_px2"]
-
-
-def draw_overlay(frame: np.ndarray, objects: dict, total: int, current: int, frame_num: int) -> None:
-    for obj_id, (cx, cy) in objects.items():
-        cv2.circle(frame, (cx, cy), 4, (0, 255, 0), -1)
-        cv2.putText(frame, f"#{obj_id}", (cx + 6, cy - 6),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
-    cv2.putText(frame, f"En frame: {current}", (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
-    cv2.putText(frame, f"Total acumulado: {total}", (10, 60),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
-    cv2.putText(frame, f"Frame: {frame_num}", (10, 90),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
+AWB_GAINS     = "3.0,1.8"
+DISPLAY_SCALE = 0.5
+CSV_PATH      = os.path.join(_DIR, "resultados.csv")
+CSV_COLUMNS   = ["frame", "tiempo_seg", "id", "cx", "cy", "velocidad_px_frame", "area_px2"]
 
 
-def draw_trails(frame: np.ndarray, tracker: CentroidTracker) -> None:
-    active_ids = set(tracker.active_objects().keys())
-    for obj_id, trail in tracker.trails.items():
-        if obj_id not in active_ids:
-            continue
-        pts = list(trail)
-        for i in range(1, len(pts)):
-            cv2.line(frame, pts[i - 1], pts[i], (0, 165, 255), 1)
-        if len(pts) >= 2:
-            speed = math.hypot(pts[-1][0] - pts[-2][0], pts[-1][1] - pts[-2][1])
-            cx, cy = pts[-1]
-            cv2.putText(frame, f"{speed:.0f}px", (cx + 6, cy + 16),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 165, 255), 1)
-
-
-def _speed(trail) -> float:
+def _speed(trail):
     pts = list(trail)
     if len(pts) < 2:
         return 0.0
@@ -56,7 +31,11 @@ def _speed(trail) -> float:
 
 
 def main():
-    frame_bytes = CAMERA_WIDTH * CAMERA_HEIGHT * 3 // 2  # YUV420
+    bomba = ArduinoController()
+    bomba.conectar()
+    bomba.iniciar_hilo_lectura()
+
+    frame_bytes = CAMERA_WIDTH * CAMERA_HEIGHT * 3 // 2
 
     proc = subprocess.Popen([
         "libcamera-vid",
@@ -70,10 +49,27 @@ def main():
         "--output", "-",
     ], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
-    tracker = CentroidTracker()
+    tracker   = CentroidTracker()
     frame_num = 0
-    t0 = time.time()
+    t0        = time.time()
 
+    print("\n========================================")
+    print("SISTEMA INTEGRADO - UPC Lima 2025")
+    print("Teclas en la ventana de video:")
+    print("  S - iniciar bomba")
+    print("  X - detener bomba")
+    print("  + - subir caudal 10 ml/min")
+    print("  - - bajar caudal 10 ml/min")
+    print("  Q - salir")
+    print("========================================\n")
+
+    key_actions = {
+        ord('s'): lambda: (bomba.iniciar(),  print("[Bomba] Iniciada")),
+        ord('x'): lambda: (bomba.detener(),  print("[Bomba] Detenida")),
+        ord('+'): lambda: print(f"[Bomba] Caudal: {bomba.set_caudal(bomba.caudal_actual + 10)} ml/min"),
+        ord('='): lambda: print(f"[Bomba] Caudal: {bomba.set_caudal(bomba.caudal_actual + 10)} ml/min"),
+        ord('-'): lambda: print(f"[Bomba] Caudal: {bomba.set_caudal(bomba.caudal_actual - 10)} ml/min"),
+    }
 
     with open(CSV_PATH, "w", newline="") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=CSV_COLUMNS)
@@ -85,40 +81,50 @@ def main():
                 break
 
             time_sec = round(time.time() - t0, 3)
-            yuv = np.frombuffer(raw, dtype=np.uint8).reshape((CAMERA_HEIGHT * 3 // 2, CAMERA_WIDTH))
+            yuv   = np.frombuffer(raw, dtype=np.uint8).reshape((CAMERA_HEIGHT * 3 // 2, CAMERA_WIDTH))
             frame = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_I420)
 
             detections = detect_particles(frame)
-            area_map = {d["centroid"]: d["area"] for d in detections}
+            area_map   = {d["centroid"]: d["area"] for d in detections}
 
             tracker.update(detections)
             active = tracker.active_objects()
 
             for obj_id, (cx, cy) in active.items():
                 speed = _speed(tracker.trails[obj_id])
-                area = area_map.get((cx, cy), 0)
+                area  = area_map.get((cx, cy), 0)
                 writer.writerow({
-                    "frame": frame_num,
-                    "tiempo_seg": round(time_sec, 3),
-                    "id": obj_id,
-                    "cx": cx,
-                    "cy": cy,
-                    "velocidad_px_frame": round(speed, 2),
-                    "area_px2": round(area, 1),
+                    "frame":               frame_num,
+                    "tiempo_seg":          round(time_sec, 3),
+                    "id":                  obj_id,
+                    "cx":                  cx,
+                    "cy":                  cy,
+                    "velocidad_px_frame":  round(speed, 2),
+                    "area_px2":            round(area, 1),
                 })
 
-            draw_overlay(frame, active, tracker.total_count, len(active), frame_num)
+            draw_overlay(frame, active, tracker.total_count, len(active), frame_num,
+                         estado_bomba=bomba.estado())
             draw_trails(frame, tracker)
 
-            cv2.imshow("Microplasticos", frame)
+            cv2.imshow("Microplasticos - UPC Lima 2026", frame)
+
+            key = cv2.waitKey(1) & 0xFF
+            if key in (ord('q'), ord('Q')):
+                break
+            action = key_actions.get(key) or key_actions.get(key | 0x20)
+            if action:
+                action()
 
             frame_num += 1
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
 
+    bomba.cerrar()
     proc.terminate()
     cv2.destroyAllWindows()
-    print(f"Total de microplasticos detectados: {tracker.total_count}")
+
+    estado_final = bomba.estado()
+    print(f"\nTotal microplasticos detectados: {tracker.total_count}")
+    print(f"Volumen total procesado: {estado_final['volumen_ml']:.1f} ml / {estado_final['volumen_litros']:.4f} L")
     print(f"CSV guardado en: {CSV_PATH}")
 
 
